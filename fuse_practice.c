@@ -28,14 +28,18 @@ static int prac_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 static int prac_read(const char *path, char *buffer, size_t size, off_t offset,
     struct fuse_file_info *fi);
 
+static int prac_truncate(const char *path, off_t size, struct fuse_file_info *fi);
+
 static int prac_write(const char *path, const char *buffer, size_t size, off_t offset,
     struct fuse_file_info *fi);
 
 static int prac_mkdir(const char *path, mode_t mode);
 static int prac_mknod(const char *path, mode_t mode, dev_t rdev);
+static int prac_rmdir(const char *path);
 int is_dir(const char *path);
 int is_file(const char *path);
 int get_file_index(const char *path);
+int get_dir_index(const char *path);
 static int prac_opt_proc(void *data, const char *arg, int key,
 	struct fuse_args *outargs);
 
@@ -62,9 +66,11 @@ static const struct fuse_operations prac_ops = {
     .getattr = prac_getattr,
     .readdir = prac_readdir,
     .read = prac_read,
+    .truncate = prac_truncate,
     .write = prac_write,
     .mkdir = prac_mkdir,
-    .mknod = prac_mknod
+    .mknod = prac_mknod,
+    .rmdir = prac_rmdir
 };
 
 int main(int argc, char *argv[]) {
@@ -86,7 +92,7 @@ static void *prac_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 		strcpy(files[file_idx], options.initfile_name);
 		if (options.initfile_content != NULL) {
 			content_idx++;
-			memcpy(file_contents[content_idx], options.initfile_content, strlen(options.initfile_content));
+			strcpy(file_contents[content_idx], options.initfile_content);
 		}
 	}
 	return NULL;
@@ -103,15 +109,16 @@ static int prac_getattr(const char *path, struct stat *stbuf,
 	if (strcmp(path, "/") == 0 || is_dir(path) == 1) {
 		// If root or any directory, set directory mode & permission bits
 		// 2 hardlinks as directory has links "/." and "/.."
-		stbuf->st_mode = S_IFDIR | 0755;
+		stbuf->st_mode = S_IFDIR | 0755; // 0755
 		stbuf->st_nlink = 2;
 	} else if (is_file(path) == 1) {
 		// If file, set file mode & permission bits
 		// Only link to itself
-		// All file sizes 1024 bytes
+		// Can set all size for all files
 		stbuf->st_mode = S_IFREG | 0644;
 		stbuf->st_nlink = 1;
-		stbuf->st_size = 1024;
+        int index = get_file_index(path);
+		stbuf->st_size = sizeof(file_contents[index]);
 	} else {
 		return -ENOENT;
 	}
@@ -127,10 +134,12 @@ static int prac_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 	
     if (strcmp(path, "/") == 0) {
         for (int i = 0; i <= dir_idx; i++) {
-            filler(buffer, directories[i], NULL, 0, 0);
+            if (strcmp(directories[i], "") != 0)
+                filler(buffer, directories[i], NULL, 0, 0);
         }
         for (int j = 0; j <= file_idx; j++) {
-            filler(buffer, files[j], NULL, 0, 0);
+            if (files[j] != NULL)
+                filler(buffer, files[j], NULL, 0, 0);
         }
     }
     return 0;
@@ -149,6 +158,21 @@ static int prac_read(const char *path, char *buffer, size_t size, off_t offset,
         size = 0;
     }
     return size;
+}
+
+static int prac_truncate(const char *path, off_t size, struct fuse_file_info *fi)
+{
+    if (size > 1024) {
+        return -ENOMEM;
+    }
+
+    int index = get_file_index(path);
+    int curr_content_size = sizeof(file_contents[index]);
+    if (size > curr_content_size) {
+        memset(file_contents[index] + curr_content_size, 0, size - curr_content_size);
+    }
+
+    return 0;
 }
 
 static int prac_write(const char *path, const char *buffer, size_t size, off_t offset,
@@ -186,6 +210,19 @@ static int prac_mknod(const char *path, mode_t mode, dev_t rdev)
     return 0;
 }
 
+// TODO: Fix, only works once then causes crash
+static int prac_rmdir(const char *path) {
+    int dir_index = get_dir_index(path);
+    strcpy(directories[dir_index], "");
+
+    if (strcmp(directories[dir_index], "") != 0) {
+        return -1;
+    } else {
+        printf("Here");
+        return 0;
+    }
+}
+
 int is_dir(const char *path)
 {
     path++; // Keep name without "/"
@@ -213,6 +250,17 @@ int get_file_index(const char *path)
     path++;
     for (int i = 0; i <= file_idx; i++) {
         if (strcmp(path, files[i]) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int get_dir_index(const char *path)
+{
+    path++;
+    for (int i = 0; i <= file_idx; i++) {
+        if (strcmp(path, directories[i]) == 0) {
             return i;
         }
     }
