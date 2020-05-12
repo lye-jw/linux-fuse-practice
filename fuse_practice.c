@@ -6,6 +6,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stddef.h>
 
 char directories[256][256];
 int dir_idx = -1;
@@ -15,6 +16,8 @@ int file_idx = -1;
 
 char file_contents[256][256];
 int content_idx = -1;
+
+static void *prac_init(struct fuse_conn_info *conn, struct fuse_config *cfg);
 
 static int prac_getattr(const char *path, struct stat *stbuf,
 	struct fuse_file_info *fi);
@@ -33,8 +36,29 @@ static int prac_mknod(const char *path, mode_t mode, dev_t rdev);
 int is_dir(const char *path);
 int is_file(const char *path);
 int get_file_index(const char *path);
+static int prac_opt_proc(void *data, const char *arg, int key,
+	struct fuse_args *outargs);
+
+static struct options {
+	const char *initfile_name;
+	const char *initfile_content;
+} options;
+
+#define KEY_HELP 1
+
+// t = option flag, a = attribute in options strucct
+#define OPTION(t, a) { t, offsetof(struct options, a), 1 }
+static const struct fuse_opt option_specs[] = {
+	OPTION("--init=%s", initfile_name),
+	OPTION("--content=%s", initfile_content),
+
+	FUSE_OPT_KEY("-h", KEY_HELP),
+	FUSE_OPT_KEY("--help", KEY_HELP),
+	FUSE_OPT_END
+};
 
 static const struct fuse_operations prac_ops = {
+	.init = prac_init,
     .getattr = prac_getattr,
     .readdir = prac_readdir,
     .read = prac_read,
@@ -44,7 +68,28 @@ static const struct fuse_operations prac_ops = {
 };
 
 int main(int argc, char *argv[]) {
-    return fuse_main(argc, argv, &prac_ops, NULL);
+	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+	if (fuse_opt_parse(&args, &options, option_specs, prac_opt_proc) == -1) {
+		return 1;
+	}
+
+	/* Important: To make command line arg options work,
+	   pass fuse_args#argc and fuse_args#argv to fuse_main().
+	   Pass argc and argv only if no options or fuse_args needed. */
+    return fuse_main(args.argc, args.argv, &prac_ops, NULL);
+}
+
+static void *prac_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
+{
+	if (options.initfile_name != NULL) {
+		file_idx++;
+		strcpy(files[file_idx], options.initfile_name);
+		if (options.initfile_content != NULL) {
+			content_idx++;
+			memcpy(file_contents[content_idx], options.initfile_content, strlen(options.initfile_content));
+		}
+	}
+	return NULL;
 }
 
 static int prac_getattr(const char *path, struct stat *stbuf,
@@ -52,8 +97,8 @@ static int prac_getattr(const char *path, struct stat *stbuf,
 {
 	stbuf->st_uid = getuid();	// Owner id
 	stbuf->st_gid = getgid();	// Group id
-	stbuf->st_atime = time( NULL ); // Last access time
-	stbuf->st_mtime = time( NULL ); // Last modified time
+	stbuf->st_atime = 0; // Last access time
+	stbuf->st_mtime = 0; // Last modified time
 
 	if (strcmp(path, "/") == 0 || is_dir(path) == 1) {
 		// If root or any directory, set directory mode & permission bits
@@ -172,4 +217,19 @@ int get_file_index(const char *path)
         }
     }
     return -1;
+}
+
+static int prac_opt_proc(void *data, const char *arg, int key,
+	struct fuse_args *outargs)
+{
+	if (key == KEY_HELP) {
+		printf("usage: %s [options] <mountpoint>\n\n", outargs->argv[0]);
+		printf("File-system specific options:\n"
+       		"    --init=<s>         Name of the init file\n"
+       		"    --content=<s>      Content of the init file\n"
+       		"\n");
+		// May not need to add to arg
+		fuse_opt_add_arg(outargs, "-h");
+	}
+	return 1;
 }
