@@ -35,6 +35,7 @@ static int prac_write(const char *path, const char *buffer, size_t size, off_t o
 
 static int prac_mkdir(const char *path, mode_t mode);
 static int prac_mknod(const char *path, mode_t mode, dev_t rdev);
+static int prac_unlink(const char *path);
 static int prac_rmdir(const char *path);
 int is_dir(const char *path);
 int is_file(const char *path);
@@ -70,6 +71,7 @@ static const struct fuse_operations prac_ops = {
     .write = prac_write,
     .mkdir = prac_mkdir,
     .mknod = prac_mknod,
+	.unlink = prac_unlink,
     .rmdir = prac_rmdir
 };
 
@@ -103,8 +105,8 @@ static int prac_getattr(const char *path, struct stat *stbuf,
 {
     stbuf->st_uid = getuid();	// Owner id
     stbuf->st_gid = getgid();	// Group id
-    stbuf->st_atime = time(NULL); // Last access time
-    stbuf->st_mtime = time(NULL); // Last modified time
+    // stbuf->st_atime = time(NULL); // Last access time
+    // stbuf->st_mtime = time(NULL); // Last modified time
 
     if (strcmp(path, "/") == 0 || is_dir(path) == 1) {
         // If root or any directory, set directory mode & permission bits
@@ -138,7 +140,7 @@ static int prac_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 filler(buffer, directories[i], NULL, 0, 0);
         }
         for (int j = 0; j <= file_idx; j++) {
-            if (files[j] != NULL)
+            if (strcmp(files[j], "") != 0)
                 filler(buffer, files[j], NULL, 0, 0);
         }
     }
@@ -210,7 +212,18 @@ static int prac_mknod(const char *path, mode_t mode, dev_t rdev)
     return 0;
 }
 
-// TODO: Fix, only works once then causes crash
+static int prac_unlink(const char *path) {
+    int file_index = get_file_index(path);
+    strcpy(files[file_index], "");
+	strcpy(file_contents[file_index], "");
+
+    if (strcmp(files[file_index], "") != 0) {
+        return -1;
+    } else {
+        return 0;
+    }
+}
+
 static int prac_rmdir(const char *path) {
     int dir_index = get_dir_index(path);
     strcpy(directories[dir_index], "");
